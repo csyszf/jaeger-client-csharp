@@ -7,12 +7,11 @@ using Jaeger.Metrics;
 using Jaeger.Senders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenTracing;
 
 namespace Jaeger.Reporters
 {
     /// <summary>
-    /// <see cref="RemoteReporter"/> buffers spans in memory and sends them out of process using <see cref="ISender"/>.
+    /// <see cref="RemoteReporterV2"/> buffers spans in memory and sends them out of process using <see cref="ISender"/>.
     /// </summary>
     public class RemoteReporterV2 : IReporter
     {
@@ -32,34 +31,36 @@ namespace Jaeger.Reporters
         {
             _sender = sender;
             _metrics = metrics;
-            _logger = loggerFactory.CreateLogger<RemoteReporter>();
+            _logger = loggerFactory.CreateLogger<RemoteReporterV2>();
 
-            // Guarantee this channel can only have single reader, but could be with multi writer.
-            if (maxQueueSize < 1)
+            // 1. Guarantee this channel can only have single reader, but could be with multi writer.
+            // 2. AllowSynchronousContinuations need to be false, or a slow read operation may block the write operation which awaked it. 
+            if (maxQueueSize < 1) // unlimited queue
             {
                 _commandQueue = Channel.CreateUnbounded<ICommand>(new UnboundedChannelOptions
                 {
                     SingleWriter = false,
                     SingleReader = true,
-                    AllowSynchronousContinuations = true
+                    AllowSynchronousContinuations = false
                 });
             }
             else
             {
                 _commandQueue = Channel.CreateBounded<ICommand>(new BoundedChannelOptions(maxQueueSize)
                 {
-                    FullMode = BoundedChannelFullMode.DropWrite, // Drop the item to be write, this is same as former behavior.
+                    FullMode = BoundedChannelFullMode.DropWrite,
                     SingleWriter = false,
                     SingleReader = true,
-                    AllowSynchronousContinuations = true
+                    AllowSynchronousContinuations = false
                 });
             }
 
             // start a thread to append spans
-            _queueProcessorTask = Task.Factory.StartNew(ProcessQueueLoop, TaskCreationOptions.LongRunning);
+            // The task returned by Task.Factory.StartNew has an invalid complete state, so we need unwrap it to make it awaitable.
+            _queueProcessorTask = Task.Factory.StartNew(ProcessQueueLoop, TaskCreationOptions.LongRunning).Unwrap();
 
             _flushInterval = flushInterval;
-            _flushTask = Task.Factory.StartNew(FlushLoop, TaskCreationOptions.LongRunning);
+            _flushTask = Task.Factory.StartNew(FlushLoop, TaskCreationOptions.LongRunning).Unwrap();
         }
 
         public void Report(Span span)
@@ -68,17 +69,10 @@ namespace Jaeger.Reporters
 
             // In drop mode, we can not determine this command has beed enqueued or dropped.
             // https://github.com/dotnet/corefx/blob/master/src/System.Threading.Channels/src/System/Threading/Channels/BoundedChannel.cs#L360
+            // A workaround: Count all write attempts, then get dropped command count by (ReporterAll - ReporterAppended)
+
             var cmd = new AppendCommand(this, span);
-            writer.TryWrite(cmd);
-        }
-
-        public void Report(ISpan span)
-        {
-            ChannelWriter<ICommand> writer = _commandQueue.Writer;
-
-            // In drop mode, we can not determine this command has beed enqueued or dropped.
-            // https://github.com/dotnet/corefx/blob/master/src/System.Threading.Channels/src/System/Threading/Channels/BoundedChannel.cs#L360
-            var cmd = new AppendCommand(this, null);
+            // In drop mode, TryWrite should always return ture.
             writer.TryWrite(cmd);
         }
 
@@ -91,7 +85,6 @@ namespace Jaeger.Reporters
             try
             {
                 // Give processor some time to process any queued commands.
-
                 var cts = CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken,
                     new CancellationTokenSource(10000).Token);
@@ -126,14 +119,12 @@ namespace Jaeger.Reporters
 
         private async Task FlushLoop()
         {
-            bool completed = false;
             // First flush should happen later so we start with the delay
             do
             {
                 await Task.Delay(_flushInterval).ConfigureAwait(false);
-                completed = !Flush(); // Flush() will return false if channel has been closed.
             }
-            while (!completed);
+            while (Flush()); // Flush() will return false if channel has been closed.
         }
 
         private async Task ProcessQueueLoop()
@@ -146,7 +137,7 @@ namespace Jaeger.Reporters
                 bool res = vt.IsCompletedSuccessfully ? vt.Result : await vt.ConfigureAwait(false);
                 if (!res) // No further command will enqueue, then we can exit the loop.
                 {
-                    return;
+                    break;
                 }
 
                 if (reader.TryRead(out ICommand command))
@@ -170,7 +161,7 @@ namespace Jaeger.Reporters
 
         public override string ToString()
         {
-            return $"{nameof(RemoteReporter)}(Sender={_sender})";
+            return $"{nameof(RemoteReporterV2)}(Sender={_sender})";
         }
 
         /*
@@ -255,7 +246,7 @@ namespace Jaeger.Reporters
                 return this;
             }
 
-            public RemoteReporter Build()
+            public RemoteReporterV2 Build()
             {
                 if (_loggerFactory == null)
                 {
@@ -269,7 +260,7 @@ namespace Jaeger.Reporters
                 {
                     _metrics = new MetricsImpl(NoopMetricsFactory.Instance);
                 }
-                return new RemoteReporter(_sender, _flushInterval, _maxQueueSize, _metrics, _loggerFactory);
+                return new RemoteReporterV2(_sender, _flushInterval, _maxQueueSize, _metrics, _loggerFactory);
             }
         }
     }
