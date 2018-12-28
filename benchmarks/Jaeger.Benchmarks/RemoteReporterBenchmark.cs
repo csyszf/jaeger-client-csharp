@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BenchmarkDotNet.Attributes;
 using Jaeger;
 using Jaeger.Metrics;
 using Jaeger.Reporters;
@@ -12,14 +13,23 @@ using Microsoft.Extensions.Logging;
 
 namespace Jaeger.Benchmarks
 {
+    public enum ReporterToUse
+    {
+        RemoteReporter,
+        RemoteReporterV2
+    }
+
     public class RemoteReporterBenchmark
     {
-        private const int QueueCount = 10_000_000;
+        private IReporter _reporter;
+
+        private const int QueueCount = 30_000_000;
+        private const int MaxQueueSize = 100;
         public async Task RunReport()
         {
             var sender = new MockSender();
-            var reporter =  new RemoteReporter.Builder()
-                .WithMaxQueueSize(-1)
+            var reporter = new RemoteReporter.Builder()
+                .WithMaxQueueSize(MaxQueueSize)
                 .WithSender(sender)
                 .Build();
 
@@ -74,12 +84,30 @@ namespace Jaeger.Benchmarks
             return Task.FromResult(0);
         }
     }
-    
+
     public class MockSpan : Jaeger.Span
     {
         internal MockSpan()
             : base(default, default, default, default, new Dictionary<string, object>(), default)
         {
+        }
+    }
+
+    public class NoOpSender : ISender
+    {
+        public Task<int> AppendAsync(Span span, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(0);
+        }
+
+        public Task<int> CloseAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(0);
+        }
+
+        public Task<int> FlushAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(0);
         }
     }
 

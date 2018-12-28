@@ -32,7 +32,10 @@ namespace Jaeger.Reporters
             _sender = sender;
             _metrics = metrics;
             _logger = loggerFactory.CreateLogger<RemoteReporter>();
-            _commandQueue = new BlockingCollection<ICommand>(maxQueueSize);
+            if (maxQueueSize < 1)
+                _commandQueue = new BlockingCollection<ICommand>();
+            else 
+                _commandQueue = new BlockingCollection<ICommand>(maxQueueSize);
 
             // start a thread to append spans
             _queueProcessorTask = Task.Factory.StartNew(ProcessQueueLoop, TaskCreationOptions.LongRunning);
