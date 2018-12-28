@@ -13,23 +13,15 @@ using Microsoft.Extensions.Logging;
 
 namespace Jaeger.Benchmarks
 {
-    public enum ReporterToUse
-    {
-        RemoteReporter,
-        RemoteReporterV2
-    }
-
     public class RemoteReporterBenchmark
     {
-        private IReporter _reporter;
-
-        private const int QueueCount = 30_000_000;
+        private const int QueueCount = 10_000_000;
         private const int MaxQueueSize = 100;
         public async Task RunReport()
         {
             var sender = new MockSender();
             var reporter = new RemoteReporter.Builder()
-                .WithMaxQueueSize(MaxQueueSize)
+                .WithMaxQueueSize(500)
                 .WithSender(sender)
                 .Build();
 
@@ -55,6 +47,9 @@ namespace Jaeger.Benchmarks
 
             finished.Signal(); // Signal that queueing is complete.
             finished.Wait();
+            
+            Console.WriteLine($"report {QueueCount} spans in {sw.ElapsedMilliseconds} ms");
+
             await reporter.CloseAsync(default).ConfigureAwait(false);
             sw.Stop();
 
@@ -90,24 +85,6 @@ namespace Jaeger.Benchmarks
         internal MockSpan()
             : base(default, default, default, default, new Dictionary<string, object>(), default)
         {
-        }
-    }
-
-    public class NoOpSender : ISender
-    {
-        public Task<int> AppendAsync(Span span, CancellationToken cancellationToken)
-        {
-            return Task.FromResult(0);
-        }
-
-        public Task<int> CloseAsync(CancellationToken cancellationToken)
-        {
-            return Task.FromResult(0);
-        }
-
-        public Task<int> FlushAsync(CancellationToken cancellationToken)
-        {
-            return Task.FromResult(0);
         }
     }
 
