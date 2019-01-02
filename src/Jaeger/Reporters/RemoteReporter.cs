@@ -35,13 +35,26 @@ namespace Jaeger.Reporters
 
             // 1. Guarantee this channel can only have single reader, but could be with multi writer.
             // 2. AllowSynchronousContinuations need to be false, or a slow read operation may block the write operation which awaked it. 
-            _commandQueue = Channel.CreateBounded<ICommand>(new BoundedChannelOptions(maxQueueSize)
+
+            if (maxQueueSize < 1)
             {
-                FullMode = BoundedChannelFullMode.DropWrite,
-                SingleWriter = false,
-                SingleReader = true,
-                AllowSynchronousContinuations = false
-            });
+                _commandQueue = Channel.CreateUnbounded<ICommand>(new UnboundedChannelOptions
+                {
+                    SingleWriter = false,
+                    SingleReader = true,
+                    AllowSynchronousContinuations = false
+                });
+            }
+            else
+            {
+                _commandQueue = Channel.CreateBounded<ICommand>(new BoundedChannelOptions(maxQueueSize)
+                {
+                    FullMode = BoundedChannelFullMode.DropWrite,
+                    SingleWriter = false,
+                    SingleReader = true,
+                    AllowSynchronousContinuations = false
+                });
+            }
 
             // start a thread to append spans
             // The task returned by Task.Factory.StartNew has an invalid complete state, so we need unwrap it to make it awaitable.
