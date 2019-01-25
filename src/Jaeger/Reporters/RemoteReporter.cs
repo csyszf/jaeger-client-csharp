@@ -34,14 +34,14 @@ namespace Jaeger.Reporters
             _logger = loggerFactory.CreateLogger<RemoteReporter>();
             if (maxQueueSize < 1)
                 _commandQueue = new BlockingCollection<ICommand>();
-            else 
+            else
                 _commandQueue = new BlockingCollection<ICommand>(maxQueueSize);
 
             // start a thread to append spans
-            _queueProcessorTask = Task.Factory.StartNew(ProcessQueueLoop, TaskCreationOptions.LongRunning);
+            _queueProcessorTask = Task.Run(ProcessQueueLoop);
 
             _flushInterval = flushInterval;
-            _flushTask = Task.Factory.StartNew(FlushLoop, TaskCreationOptions.LongRunning);
+            _flushTask = Task.Run(FlushLoop);
         }
 
         public void Report(Span span)
@@ -73,12 +73,15 @@ namespace Jaeger.Reporters
             {
                 // Give processor some time to process any queued commands.
 
-                var cts = CancellationTokenSource.CreateLinkedTokenSource(
-                    cancellationToken,
-                    new CancellationTokenSource(10000).Token);
-                var cancellationTask = Task.Delay(Timeout.Infinite, cts.Token);
+                // var cts = CancellationTokenSource.CreateLinkedTokenSource(
+                //     cancellationToken,
+                //     new CancellationTokenSource(30000).Token);
+                // var cancellationTask = Task.Delay(Timeout.Infinite, cts.Token);
 
-                await Task.WhenAny(_queueProcessorTask, cancellationTask);
+                // await Task.WhenAny(_queueProcessorTask, cancellationTask);
+
+                await _queueProcessorTask;
+
             }
             catch (OperationCanceledException ex)
             {

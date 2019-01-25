@@ -57,10 +57,10 @@ namespace Jaeger.Reporters
 
             // start a thread to append spans
             // The task returned by Task.Factory.StartNew has an invalid complete state, so we need unwrap it to make it awaitable.
-            _queueProcessorTask = Task.Factory.StartNew(ProcessQueueLoop, TaskCreationOptions.LongRunning).Unwrap();
+            _queueProcessorTask = Task.Run(ProcessQueueLoop);
 
             _flushInterval = flushInterval;
-            _flushTask = Task.Factory.StartNew(FlushLoop, TaskCreationOptions.LongRunning).Unwrap();
+            _flushTask = Task.Run(FlushLoop);
         }
 
         public void Report(Span span)
@@ -84,13 +84,14 @@ namespace Jaeger.Reporters
 
             try
             {
-                // Give processor some time to process any queued commands.
-                var cts = CancellationTokenSource.CreateLinkedTokenSource(
-                    cancellationToken,
-                    new CancellationTokenSource(10000).Token);
-                var cancellationTask = Task.Delay(Timeout.Infinite, cts.Token);
+                // // Give processor some time to process any queued commands.
+                // var cts = CancellationTokenSource.CreateLinkedTokenSource(
+                //     cancellationToken,
+                //     new CancellationTokenSource(30000).Token);
+                // var cancellationTask = Task.Delay(Timeout.Infinite, cts.Token);
 
-                await Task.WhenAny(_queueProcessorTask, cancellationTask);
+                // await Task.WhenAny(_queueProcessorTask, cancellationTask);
+                await _queueProcessorTask;
             }
             catch (OperationCanceledException ex)
             {
@@ -140,7 +141,7 @@ namespace Jaeger.Reporters
                     break;
                 }
 
-                if (reader.TryRead(out ICommand command))
+                while (reader.TryRead(out ICommand command))
                 {
                     try
                     {
